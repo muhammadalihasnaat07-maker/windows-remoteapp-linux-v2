@@ -1,0 +1,11 @@
+.env
+credentials
+credentials.conf
+*.log
+*.bak
+*.backup
+*.swp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
