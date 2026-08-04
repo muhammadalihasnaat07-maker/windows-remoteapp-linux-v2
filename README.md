@@ -157,7 +157,7 @@ echo "$XDG_SESSION_TYPE"   # must show: x11
 
 ```bash
 # 1. Clone this repository
-git clone https://github.com/YOUR_GITHUB_USERNAME/windows-remoteapp-linux.git
+git clone https://github.com/muhammadalihasnaat07-maker/windows-remoteapp-linux.git
 cd windows-remoteapp-linux
 
 # 2. Create your working directory
