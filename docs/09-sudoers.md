@@ -1,30 +1,24 @@
-# 9. Configure restricted sudo permissions
+# 9. Docker user access
 
-Desktop shortcuts cannot respond to terminal password prompts. Add narrowly scoped permissions.
+The v2 runtime expects Docker commands to work as the current Linux user.
 
-Run:
-
-```bash
-sudo visudo -f /etc/sudoers.d/winapps-container
-```
-
-Add, replacing `YOUR_LINUX_USER`:
-
-```text
-YOUR_LINUX_USER ALL=(root) NOPASSWD: /usr/bin/docker compose up -d, /usr/bin/docker stop WinApps
-```
-
-Validate:
+Verify:
 
 ```bash
-sudo chmod 440 /etc/sudoers.d/winapps-container
-sudo visudo -cf /etc/sudoers.d/winapps-container
+docker ps
+docker compose version
 ```
 
-Test:
+Desktop shortcuts cannot answer terminal privilege prompts, so Docker user permissions must be working before using RemoteApps.
+
+On distributions that use the `docker` group, installation commonly adds the Linux account to that group.
+
+A logout/login is normally required before new group membership becomes active.
+
+Inspect current groups with:
 
 ```bash
-cd "$HOME/WinApps"
-sudo -n /usr/bin/docker compose up -d
-sudo -n /usr/bin/docker stop WinApps
+id
 ```
+
+The WinApps production launchers call Docker directly as the current user.

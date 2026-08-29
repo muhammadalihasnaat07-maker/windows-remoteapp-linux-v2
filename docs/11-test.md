@@ -1,21 +1,43 @@
 # 11. Test the setup
 
-Start with Notepad:
+Start with the Notepad broker test:
 
 ```bash
-"$HOME/.local/bin/winapp-launcher" 'notepad.exe'
+./scripts/test-notepad.sh
 ```
 
-Then test Office:
+Verify:
+
+- keyboard input;
+- window resizing;
+- minimize and restore;
+- maximize and restore;
+- Linux-to-Windows clipboard;
+- Windows-to-Linux clipboard.
+
+Next launch two detected applications from the Linux application menu, for example Word and Excel.
+
+Expected lifecycle:
+
+1. Word opens.
+2. Excel opens without logging Word off.
+3. Both applications remain usable simultaneously.
+4. Closing Word leaves Excel running.
+5. Closing Excel as the final managed application ends the broker session.
+6. The `WinApps` container stops automatically.
+
+Check container state with:
 
 ```bash
-"$HOME/.local/bin/winapp-launcher" 'C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE'
+docker ps -a --filter name=WinApps --format 'table {{.Names}}\t{{.Status}}'
 ```
 
-After closing the final application, wait several seconds and verify:
+After automatic shutdown, `Exited (143)` is expected because the supervisor performs a normal Docker stop operation.
+
+While applications are open, inspect broker state with:
 
 ```bash
-sudo docker ps -a --filter name=WinApps --format 'table {{.Names}}\t{{.Status}}'
+./scripts/diagnose-winapps.sh
 ```
 
-Expected status: `Exited`.
+There should normally be one persistent broker FreeRDP connection rather than one independent FreeRDP connection per application.

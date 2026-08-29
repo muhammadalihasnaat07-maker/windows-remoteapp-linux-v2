@@ -1,121 +1,304 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP="${1:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-COMPOSE_DIR="${WINAPPS_COMPOSE_DIR:-$HOME/WinApps}"
-SHARE_DIR="${WINAPPS_SHARE_DIR:-$HOME}"
-CREDENTIALS_FILE="${WINAPPS_CREDENTIALS_FILE:-$HOME/.config/winapps/credentials}"
+START_SCRIPT="$SCRIPT_DIR/start-windows.sh"
+
+WINAPPS_CONFIG_DIR="${WINAPPS_CONFIG_DIR:-$HOME/.config/winapps}"
+CREDENTIALS_FILE="${WINAPPS_CREDENTIALS_FILE:-$WINAPPS_CONFIG_DIR/credentials}"
+
 CONTAINER_NAME="${WINAPPS_CONTAINER_NAME:-WinApps}"
+
 RDP_HOST="${WINAPPS_RDP_HOST:-127.0.0.1}"
 RDP_PORT="${WINAPPS_RDP_PORT:-3389}"
-DOCKER_BIN="${DOCKER_BIN:-/usr/bin/docker}"
-COLD_BOOT_DELAY="${WINAPPS_COLD_BOOT_DELAY:-45}"
-STOP_GRACE_SECONDS="${WINAPPS_STOP_GRACE_SECONDS:-5}"
 
-if [[ -z "$APP" ]]; then
-  echo "Usage: $0 '<Windows executable or full Windows path>'" >&2
-  exit 2
-fi
+STOP_GRACE="${WINAPPS_STOP_GRACE:-5}"
 
-if [[ "${XDG_SESSION_TYPE:-}" != "x11" ]]; then
-  echo "Warning: RemoteApp input may not work correctly outside an X11/Xorg session." >&2
-fi
-
-[[ -d "$COMPOSE_DIR" ]] || { echo "Compose directory not found: $COMPOSE_DIR" >&2; exit 1; }
-[[ -d "$SHARE_DIR" ]] || { echo "Share directory not found: $SHARE_DIR" >&2; exit 1; }
-[[ -f "$CREDENTIALS_FILE" ]] || { echo "Credentials file not found: $CREDENTIALS_FILE" >&2; exit 1; }
-
-# shellcheck source=/dev/null
-source "$CREDENTIALS_FILE"
-: "${RDP_USER:?RDP_USER is missing}"
-: "${RDP_PASS:?RDP_PASS is missing}"
-
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/winapps-container-manager"
-LOCK_FILE="$RUNTIME_DIR/container.lock"
-SESSION_FILE="$RUNTIME_DIR/session-$$"
-mkdir -p "$RUNTIME_DIR"
-chmod 700 "$RUNTIME_DIR"
-touch "$SESSION_FILE"
-
-compose() {
-  (
-    cd "$COMPOSE_DIR"
-    sudo -n "$DOCKER_BIN" compose "$@"
-  )
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
 }
 
-remove_stale_sessions() {
-  local file pid
-  shopt -s nullglob
-  for file in "$RUNTIME_DIR"/session-*; do
-    pid="${file##*-}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$file"
-  done
+usage() {
+    cat <<USAGE
+Usage:
+  $0 <windows-program-path> [windows-command-line]
+
+Examples:
+  $0 'C:\Windows\System32\notepad.exe'
+
+  $0 \
+    'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' \
+    '-NoProfile -File "Z:\script.ps1"'
+USAGE
+}
+
+if (( $# < 1 || $# > 2 )); then
+    usage
+    exit 2
+fi
+
+APP_PATH="$1"
+APP_CMD="${2:-}"
+
+[[ -n "$APP_PATH" ]] ||
+    die "Windows application path cannot be empty."
+
+if [[ "$APP_PATH" == *$'\n'* || "$APP_CMD" == *$'\n'* ]]; then
+    die "Application path/command must not contain newline characters."
+fi
+
+[[ "$STOP_GRACE" =~ ^[0-9]+$ ]] ||
+    die "WINAPPS_STOP_GRACE must be a non-negative integer."
+
+[[ -x "$START_SCRIPT" ]] ||
+    die "Windows startup script missing: $START_SCRIPT"
+
+[[ -f "$CREDENTIALS_FILE" ]] ||
+    die "Credentials file missing: $CREDENTIALS_FILE"
+
+# ------------------------------------------------------------
+# X11 requirement
+# ------------------------------------------------------------
+
+if [[ "${XDG_SESSION_TYPE:-}" != "x11" ]]; then
+    die "RemoteApp launcher currently requires an X11 session."
+fi
+
+# ------------------------------------------------------------
+# Locate FreeRDP
+# ------------------------------------------------------------
+
+if command -v xfreerdp3 >/dev/null 2>&1; then
+    FREERDP_BIN="$(command -v xfreerdp3)"
+elif command -v xfreerdp >/dev/null 2>&1; then
+    FREERDP_BIN="$(command -v xfreerdp)"
+else
+    die "FreeRDP executable not found."
+fi
+
+# ------------------------------------------------------------
+# Load credentials
+# ------------------------------------------------------------
+
+# shellcheck disable=SC1090
+source "$CREDENTIALS_FILE"
+
+[[ -n "${RDP_USER:-}" ]] ||
+    die "RDP_USER missing from $CREDENTIALS_FILE"
+
+[[ -n "${RDP_PASS:-}" ]] ||
+    die "RDP_PASS missing from $CREDENTIALS_FILE"
+
+# ------------------------------------------------------------
+# Runtime/session state
+# ------------------------------------------------------------
+
+RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}"
+RUNTIME_DIR="$RUNTIME_ROOT/winapps-$UID"
+
+STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_DIR="$STATE_ROOT/winapps"
+
+CLEANUP_LOCK="$RUNTIME_DIR/cleanup.lock"
+SESSION_MARKER="$RUNTIME_DIR/session-$$"
+CLEANUP_LOG="$STATE_DIR/cleanup.log"
+
+mkdir -p "$RUNTIME_DIR" "$STATE_DIR"
+
+chmod 700 "$RUNTIME_DIR"
+chmod 700 "$STATE_DIR"
+
+touch "$CLEANUP_LOG"
+chmod 600 "$CLEANUP_LOG"
+
+log_cleanup() {
+    printf '%s %s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" \
+        "$*" \
+        >> "$CLEANUP_LOG"
+}
+
+cleanup_stale_markers() {
+    local marker pid
+
+    shopt -s nullglob
+
+    for marker in "$RUNTIME_DIR"/session-*; do
+        [[ -f "$marker" ]] || continue
+
+        pid="$(cat "$marker" 2>/dev/null || true)"
+
+        if [[ ! "$pid" =~ ^[0-9]+$ ]] ||
+           ! kill -0 "$pid" 2>/dev/null; then
+
+            rm -f "$marker"
+            log_cleanup "removed stale marker $(basename "$marker")"
+        fi
+    done
+
+    shopt -u nullglob
 }
 
 cleanup() {
-  local status=$?
-  trap - EXIT INT TERM HUP
-  rm -f "$SESSION_FILE"
+    local original_status=$?
+    local markers=()
 
-  (
-    flock -x 9
-    remove_stale_sessions
-    shopt -s nullglob
-    local sessions=("$RUNTIME_DIR"/session-*)
+    trap - EXIT INT TERM HUP
 
-    if (( ${#sessions[@]} == 0 )); then
-      sleep "$STOP_GRACE_SECONDS"
-      remove_stale_sessions
-      sessions=("$RUNTIME_DIR"/session-*)
+    rm -f "$SESSION_MARKER"
 
-      if (( ${#sessions[@]} == 0 )); then
-        sudo -n "$DOCKER_BIN" stop "$CONTAINER_NAME" \
-          >>"$HOME/.winapps-cleanup.log" 2>&1 || true
-      fi
+    if (( STOP_GRACE > 0 )); then
+        sleep "$STOP_GRACE"
     fi
-  ) 9>"$LOCK_FILE"
 
-  exit "$status"
+    exec 8>"$CLEANUP_LOCK"
+    flock 8
+
+    cleanup_stale_markers
+
+    shopt -s nullglob
+    markers=("$RUNTIME_DIR"/session-*)
+    shopt -u nullglob
+
+    if (( ${#markers[@]} == 0 )); then
+        if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+
+            running="$(
+                docker inspect \
+                    --format '{{.State.Running}}' \
+                    "$CONTAINER_NAME" \
+                    2>/dev/null ||
+                true
+            )"
+
+            if [[ "$running" == "true" ]]; then
+                log_cleanup "last managed RemoteApp closed; stopping $CONTAINER_NAME"
+
+                docker stop "$CONTAINER_NAME" \
+                    >>"$CLEANUP_LOG" 2>&1 ||
+                    log_cleanup "WARNING: docker stop $CONTAINER_NAME failed"
+            fi
+        fi
+    else
+        log_cleanup \
+            "managed RemoteApp still active; keeping $CONTAINER_NAME running"
+    fi
+
+    exit "$original_status"
 }
 
-trap cleanup EXIT INT TERM HUP
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
-RDP_WAS_READY=false
-if timeout 1 bash -c "</dev/tcp/$RDP_HOST/$RDP_PORT" 2>/dev/null; then
-  RDP_WAS_READY=true
+# ------------------------------------------------------------
+# Remove markers left by abnormal previous launcher exits
+# ------------------------------------------------------------
+
+exec 7>"$CLEANUP_LOCK"
+flock 7
+
+cleanup_stale_markers
+
+flock -u 7
+exec 7>&-
+
+# ------------------------------------------------------------
+# Start Windows and wait until authentication really works
+# ------------------------------------------------------------
+
+echo "Preparing Windows..."
+
+WINAPPS_CREDENTIALS_FILE="$CREDENTIALS_FILE" \
+    "$START_SCRIPT"
+
+# ------------------------------------------------------------
+# Register this managed RemoteApp session
+# ------------------------------------------------------------
+
+printf '%s\n' "$$" > "$SESSION_MARKER"
+chmod 600 "$SESSION_MARKER"
+
+echo
+echo "Launching RemoteApp:"
+echo "  $APP_PATH"
+echo
+
+# ------------------------------------------------------------
+# Launch FreeRDP.
+#
+# IMPORTANT:
+# Do NOT use "exec" here.
+#
+# The shell must remain alive so the EXIT trap can remove this
+# session marker and decide whether Windows should be stopped.
+#
+# Password is supplied through /args-from:stdin rather than
+# appearing in xfreerdp's process argument list.
+# ------------------------------------------------------------
+
+RDP_APP_SPEC="/app:program:${APP_PATH}"
+
+if [[ -n "$APP_CMD" ]]; then
+    RDP_APP_SPEC+=",cmd:${APP_CMD}"
 fi
 
-compose up -d
+set +e
 
-if [[ "$RDP_WAS_READY" == false ]]; then
-  echo "Waiting for Windows RDP port..."
-  RDP_PORT_OPEN=false
+printf '%s\n' \
+    "/v:${RDP_HOST}:${RDP_PORT}" \
+    "/u:${RDP_USER}" \
+    "/p:${RDP_PASS}" \
+    "$RDP_APP_SPEC" \
+    "/cert:ignore" \
+    "/log-level:WARN" \
+    "+clipboard" \
+    "+auto-reconnect" |
+    "$FREERDP_BIN" /args-from:stdin
 
-  for ((attempt = 1; attempt <= 90; attempt++)); do
-    if timeout 1 bash -c "</dev/tcp/$RDP_HOST/$RDP_PORT" 2>/dev/null; then
-      RDP_PORT_OPEN=true
-      break
-    fi
-    sleep 2
-  done
+RDP_STATUS="${PIPESTATUS[1]}"
 
-  if [[ "$RDP_PORT_OPEN" != true ]]; then
-    echo "Windows RDP port did not become available." >&2
-    exit 1
-  fi
+set -e
 
-  echo "RDP port is open. Waiting ${COLD_BOOT_DELAY}s for Windows login services..."
-  sleep "$COLD_BOOT_DELAY"
-fi
+# ------------------------------------------------------------
+# Normalize expected user-initiated RemoteApp termination.
+#
+# FreeRDP may return:
+#   0  = success
+#   11 = disconnect initiated by user
+#   12 = logoff by user (ERRINFO_LOGOFF_BY_USER / 0x0000000C)
+#
+# Closing the final RemoteApp can legitimately produce 11 or 12.
+# These are not application-launch failures.
+# ------------------------------------------------------------
 
-xfreerdp3 \
-  "/v:${RDP_HOST}:${RDP_PORT}" \
-  "/u:${RDP_USER}" \
-  "/p:${RDP_PASS}" \
-  "/app:program:${APP}" \
-  "/drive:LinuxShared,${SHARE_DIR}" \
-  +clipboard \
-  /cert:ignore \
-  -gfx
+case "$RDP_STATUS" in
+    0)
+        NORMALIZED_STATUS=0
+        echo
+        echo "RemoteApp connection ended normally."
+        ;;
+
+    11)
+        NORMALIZED_STATUS=0
+        echo
+        echo "RemoteApp disconnected by user."
+        ;;
+
+    12)
+        NORMALIZED_STATUS=0
+        echo
+        echo "RemoteApp session logged off normally."
+        ;;
+
+    *)
+        NORMALIZED_STATUS="$RDP_STATUS"
+        echo
+        echo "RemoteApp connection failed/ended with FreeRDP exit code: $RDP_STATUS"
+        ;;
+esac
+
+exit "$NORMALIZED_STATUS"

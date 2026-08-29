@@ -1,19 +1,27 @@
 # 6. Install FreeRDP
 
-FreeRDP 3.26 or newer is recommended.
+FreeRDP 3.26 or newer is required by this project.
 
-Verify:
+Verify the installed version:
 
 ```bash
 xfreerdp3 /version
 ```
 
-On Debian-family systems, a newer version may be available from backports:
+On supported Debian-family systems, the repository dependency installer can install the required packages:
 
 ```bash
-sudo apt update
-apt-cache policy freerdp3-x11 freerdp-x11
-sudo apt install -t <your-backports-suite> freerdp-x11 freerdp3-x11
+./scripts/install-dependencies.sh
 ```
 
-Do not copy the suite name blindly. Use the backports suite configured by your distribution.
+Package names differ between distributions and releases.
+
+If your distribution package is too old, use the supported newer package source for that distribution rather than copying a backports suite name blindly.
+
+The v2 launchers use FreeRDP for:
+
+- authentication readiness checks;
+- the full Windows desktop;
+- the persistent RemoteApp / RAIL broker connection.
+
+Credentials are supplied through `/args-from:stdin` so the runtime password is not placed in the FreeRDP process argument list.

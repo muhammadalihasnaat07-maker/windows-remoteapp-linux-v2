@@ -1,10 +1,16 @@
 # 1. Architecture overview
 
-The solution consists of four layers:
+Windows RemoteApp Linux v2 consists of these layers:
 
-1. A Windows 11 virtual machine runs inside a Docker container using Dockur Windows.
-2. Windows Remote Desktop Services exposes individual applications through RemoteApp/RAIL.
-3. FreeRDP renders each Windows application as a separate Linux window.
-4. A Linux launcher starts and stops the container automatically.
+1. A Windows 10/11 virtual machine runs inside a Dockur Windows container.
+2. Windows Remote Desktop Services exposes applications through RemoteApp / RAIL.
+3. One persistent FreeRDP connection starts the Windows RemoteApp broker.
+4. Linux application shortcuts queue requests to that broker instead of opening independent RDP sessions.
+5. The broker tracks the Windows processes it launches.
+6. After the final managed application closes, the broker exits and the Linux supervisor stops the `WinApps` container.
 
-The launcher tracks active RemoteApp processes. When the final application closes, it stops the Windows container to release RAM and CPU resources.
+The Windows system disk is stored separately in the persistent Docker volume `winapps_data`.
+
+The container itself is disposable. If necessary, it can be reconstructed around the existing persistent volume.
+
+Using one persistent broker avoids the session-conflict behavior that can occur when Word, Excel, PowerPoint, or other RemoteApps each establish separate FreeRDP sessions.

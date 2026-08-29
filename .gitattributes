@@ -1,0 +1,10 @@
+# Repository text defaults.
+* text=auto
+
+# Linux entry points/scripts must remain LF.
+*.sh text eol=lf
+
+# Windows OEM provisioning files must remain CRLF.
+oem/*.bat text eol=crlf
+oem/*.reg text eol=crlf
+oem/*.ps1 text eol=crlf

@@ -1,22 +1,48 @@
-# 10. Create desktop shortcuts
+# 10. Desktop shortcuts
+
+Desktop shortcuts are normally created automatically during:
 
 ```bash
-WINAPPS_LAUNCHER="$HOME/.local/bin/winapp-launcher" ./scripts/create-shortcuts.sh
+./setup.sh finalize
 ```
 
-Generated shortcuts are stored in:
+The application detector writes:
 
 ```text
-~/.local/share/applications
+~/.config/winapps/apps.tsv
 ```
 
-Example:
+The shortcut generator then creates application entries under:
 
-```ini
-[Desktop Entry]
-Type=Application
-Name=Microsoft Word
-Exec=/home/USER/.local/bin/winapp-launcher "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"
-Terminal=false
-Categories=Office;
+```text
+~/.local/share/applications/
+```
+
+Current shortcut names include:
+
+```text
+winapps-word.desktop
+winapps-excel.desktop
+winapps-powerpoint.desktop
+winapps-powershell.desktop
+winapps-start-windows.desktop
+winapps-windows-desktop.desktop
+```
+
+Only applications detected inside Windows receive application-specific shortcuts.
+
+Generated RemoteApp wrappers are stored under:
+
+```text
+~/.local/share/winapps/launchers/
+```
+
+RemoteApp shortcuts use the production `broker-launcher.sh` path.
+
+They reuse one persistent broker FreeRDP connection instead of creating an independent RDP session for each application.
+
+To refresh shortcuts after installing or removing Windows applications, run:
+
+```bash
+./setup.sh finalize
 ```

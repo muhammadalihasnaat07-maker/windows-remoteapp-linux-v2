@@ -1,309 +1,431 @@
 # Windows RemoteApp on Linux
 
-Run Microsoft Office and other Windows applications as individual native-looking Linux desktop windows using a Dockerized Windows 11 VM, FreeRDP 3 RemoteApp, and desktop shortcuts.
+Run Microsoft Office and other Windows applications as individual Linux desktop windows using a Dockerized Windows 10/11 VM, FreeRDP 3 RemoteApp, and a persistent RemoteApp broker.
 
-> **Community guide.** Not affiliated with Microsoft, FreeRDP, Dockur, Docker, or WinApps.
+> **Community project.** Not affiliated with Microsoft, FreeRDP, Dockur, Docker, or WinApps.
 
 ---
 
 ## How it works
 
-```
-Linux desktop
-  └── .desktop shortcut / CLI
-        └── winapp-launcher (Bash)
-              ├── starts Windows container (if not running)
-              ├── waits for RDP + cold-boot delay
-              ├── launches FreeRDP RemoteApp window
-              └── stops container when all apps close
-```
+The production design uses a **single FreeRDP connection with a persistent broker**.
 
-Each Windows application appears as a separate Linux window. You can have Word, Excel, and PowerPoint open at the same time. When you close the last one, the container stops automatically.
+The first RemoteApp starts Windows and establishes the broker session. Additional applications reuse that same session instead of creating competing RDP sessions. When the final managed application closes, the broker exits and the Linux supervisor stops the Windows container automatically.
 
 ---
 
-## What is included
+## Main components
 
 | Path | Purpose |
 |---|---|
-| `examples/compose.yml` | Docker Compose file for the Windows container |
-| `examples/.env.example` | Environment variable template |
-| `examples/credentials.example` | Launcher credential template |
-| `oem/RDPApps.reg` | Registry policy that enables unlisted RemoteApps |
-| `oem/install.bat` | Applies the registry policy automatically after Windows installs |
-| `scripts/winapp-launcher.sh` | Main launcher — start, wait, connect, stop |
-| `scripts/install-launcher.sh` | Installs the launcher to `~/.local/bin` |
-| `scripts/create-shortcuts.sh` | Creates `.desktop` shortcuts for Office apps |
-| `scripts/diagnose-winapps.sh` | Diagnostic helper for troubleshooting |
-| `docs/` | Step-by-step setup guide |
-| `distro/` | Distribution-specific package install commands |
+| `setup.sh` | Main installation/configuration entry point |
+| `compose.yml` | Canonical Dockur Windows Compose definition |
+| `config/winapps.env.example` | Configuration template |
+| `oem/install.bat` | Windows OEM provisioning entry point |
+| `oem/configure-winapps.ps1` | Windows RemoteApp/RDP provisioning |
+| `oem/RDPApps.reg` | Remote Desktop and RemoteApp registry policy |
+| `oem/winapps-broker.ps1` | Persistent Windows application broker |
+| `scripts/start-windows.sh` | Starts or reconstructs the Windows container |
+| `scripts/wait-for-rdp.sh` | Authentication-based Windows readiness check |
+| `scripts/broker-launcher.sh` | Production RemoteApp supervisor |
+| `scripts/broker-request.sh` | Queues application requests for the broker |
+| `scripts/detect-apps.sh` | Detects supported applications installed in Windows |
+| `scripts/create-shortcuts.sh` | Creates Linux `.desktop` shortcuts |
+| `scripts/windows-desktop.sh` | Opens a normal Windows RDP desktop |
+| `scripts/diagnose-winapps.sh` | Read-only diagnostic helper |
+| `scripts/test-notepad.sh` | Manual RemoteApp functionality test |
+| `uninstall.sh` | Safe project uninstaller |
+| `tests/` | Repository and lifecycle regression tests |
 
----
-
-## Important compatibility notes
-
-- **FreeRDP 3.26 or newer** is required. Earlier versions have RAIL rendering bugs.
-- **Use an X11/Xorg desktop session.** RemoteApp windows may appear under Wayland/XWayland but keyboard and mouse input will not work correctly. Log out and select an Xorg session from your login screen.
-- **Do not keep a full RDP desktop session open** while using RemoteApps. A competing session causes connection failures.
-- **Do not use `exec xfreerdp3`** in the launcher. It prevents the shell cleanup trap from running, which breaks automatic container shutdown.
-- **TCP port 3389 becomes reachable before Windows logon services are fully ready.** The launcher applies a configurable cold-boot delay after the port opens.
+`scripts/winapp-launcher.sh` is retained as an internal one-shot transport used by application detection. It is not the production user-facing RemoteApp launcher.
 
 ---
 
 ## Requirements
 
-- 64-bit Linux with hardware virtualization enabled in firmware
-- `/dev/kvm` accessible
-- Docker Engine with Compose v2 (or Podman with compatible setup)
-- FreeRDP 3.26+
-- X11/Xorg desktop session
-- 8 GB+ host RAM recommended
-- 80 GB+ free disk space recommended
+- 64-bit Linux.
+- Hardware virtualization enabled.
+- `/dev/kvm` available.
+- `/dev/net/tun` available.
+- Docker Engine.
+- Docker Compose v2.
+- Docker usable by the current user.
+- FreeRDP 3.26 or newer.
+- X11/Xorg desktop session.
+- At least 40 GiB free disk space for the default Windows disk.
+- At least 4 GiB RAM assignable to Windows.
+
+The current tested configuration uses FreeRDP 3 and X11. Wayland/XWayland is not currently considered a supported RemoteApp input path.
 
 ---
 
-## Install packages by distribution
+## Install dependencies
 
-### Debian / Ubuntu / Parrot OS / Kali Linux
+The repository includes a dependency installer for supported Debian-family systems:
 
 ```bash
-sudo apt update
-sudo apt install -y docker.io docker-compose-plugin freerdp3-x11 curl git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
+./scripts/install-dependencies.sh
 ```
 
-> If `freerdp3-x11` is not available or the version is below 3.26, try backports:
-> ```bash
-> # Replace <suite>-backports with your actual backports suite name
-> sudo apt install -t <suite>-backports freerdp3-x11
-> ```
+System package installation may require administrator privileges. Runtime WinApps Docker commands, however, are expected to work as the current user.
 
----
-
-### Fedora
+Verify:
 
 ```bash
-sudo dnf install -y dnf-plugins-core
-sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin freerdp git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-```
-
----
-
-### RHEL / AlmaLinux / Rocky Linux
-
-```bash
-sudo dnf install -y dnf-plugins-core
-sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin freerdp git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-```
-
----
-
-### Arch Linux / Manjaro
-
-```bash
-sudo pacman -Syu --noconfirm docker docker-compose freerdp git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-```
-
----
-
-### openSUSE Tumbleweed
-
-```bash
-sudo zypper install -y docker docker-compose freerdp git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-```
-
----
-
-### openSUSE Leap
-
-```bash
-sudo zypper addrepo https://download.docker.com/linux/suse/docker-ce.repo
-sudo zypper install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin freerdp git util-linux
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-```
-
----
-
-### Verify after install (all distros)
-
-```bash
-xfreerdp3 /version         # must show 3.26.0 or newer
-sudo docker compose version
+docker --version
+docker compose version
+docker ps
+xfreerdp3 /version
 ls -l /dev/kvm
-echo "$XDG_SESSION_TYPE"   # must show: x11
+ls -l /dev/net/tun
+echo "$XDG_SESSION_TYPE"
 ```
+
+`docker ps` must work without an interactive privilege prompt.
+
+For distribution-specific notes, see `distro/`.
+
+---
+
+## Preflight
+
+Run:
+
+```bash
+./scripts/preflight.sh
+```
+
+Resolve any `FAIL` result before installation.
 
 ---
 
 ## Quick setup
 
+Clone the repository:
+
 ```bash
-# 1. Clone this repository
 git clone https://github.com/muhammadalihasnaat07-maker/windows-remoteapp-linux.git
 cd windows-remoteapp-linux
-
-# 2. Create your working directory
-mkdir -p "$HOME/WinApps/oem"
-cp examples/compose.yml "$HOME/WinApps/"
-cp examples/.env.example "$HOME/WinApps/.env"
-cp oem/* "$HOME/WinApps/oem/"
-chmod 600 "$HOME/WinApps/.env"
-
-# 3. Set your Windows credentials in the .env file
-nano "$HOME/WinApps/.env"
-
-# 4. Start the Windows container
-cd "$HOME/WinApps"
-sudo docker compose up -d
-
-# 5. Open the web console and complete Windows setup
-xdg-open http://127.0.0.1:8006
-# (or open manually in your browser)
-
-# 6. Install the launcher
-cd /path/to/windows-remoteapp-linux
-./scripts/install-launcher.sh
-
-# 7. Set your RDP credentials for the launcher
-nano "$HOME/.config/winapps/credentials"
-chmod 600 "$HOME/.config/winapps/credentials"
-
-# 8. Configure passwordless sudo for Docker (required for desktop shortcuts)
-sudo visudo -f /etc/sudoers.d/winapps-container
-# Add (replace YOUR_LINUX_USER with your actual username):
-# YOUR_LINUX_USER ALL=(root) NOPASSWD: /usr/bin/docker compose up -d, /usr/bin/docker stop WinApps
-
-# 9. Create desktop shortcuts
-./scripts/create-shortcuts.sh
-
-# 10. Test with Notepad
-"$HOME/.local/bin/winapp-launcher" 'notepad.exe'
 ```
 
----
-
-## Environment variables (.env)
-
-| Variable | Default | Description |
-|---|---|---|
-| `WINDOWS_VERSION` | `11` | Windows version (see dockur/windows docs) |
-| `WINDOWS_RAM` | `4G` | RAM allocated to the VM |
-| `WINDOWS_CPUS` | `4` | CPU cores allocated to the VM |
-| `WINDOWS_DISK` | `64G` | Primary virtual disk size |
-| `WINDOWS_USERNAME` | `MyWindowsUser` | Windows account username |
-| `WINDOWS_PASSWORD` | `ChangeThisPassword` | Windows account password |
-
-Copy `examples/.env.example` to your compose directory as `.env` and edit before first launch.
-
----
-
-## Launcher environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `WINAPPS_COMPOSE_DIR` | `$HOME/WinApps` | Directory containing `compose.yml` |
-| `WINAPPS_SHARE_DIR` | `$HOME` | Linux directory shared with Windows |
-| `WINAPPS_CREDENTIALS_FILE` | `$HOME/.config/winapps/credentials` | File containing `RDP_USER` and `RDP_PASS` |
-| `WINAPPS_CONTAINER_NAME` | `WinApps` | Container name matching `compose.yml` |
-| `WINAPPS_RDP_HOST` | `127.0.0.1` | RDP host |
-| `WINAPPS_RDP_PORT` | `3389` | RDP port |
-| `WINAPPS_COLD_BOOT_DELAY` | `45` | Seconds to wait after port opens on cold boot |
-| `WINAPPS_STOP_GRACE_SECONDS` | `5` | Seconds before stopping container after last app closes |
-| `DOCKER_BIN` | `/usr/bin/docker` | Path to Docker binary |
-
----
-
-## Launching apps manually
+### 1. Configure WinApps
 
 ```bash
-# Notepad
-"$HOME/.local/bin/winapp-launcher" 'notepad.exe'
+./setup.sh configure
+```
 
-# Microsoft Word
-"$HOME/.local/bin/winapp-launcher" 'C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE'
+This creates the WinApps configuration, credentials, Compose configuration, and OEM provisioning files.
 
-# Microsoft Excel
-"$HOME/.local/bin/winapp-launcher" 'C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE'
+Default VM settings are:
 
-# Microsoft PowerPoint
-"$HOME/.local/bin/winapp-launcher" 'C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE'
+| Variable | Default |
+|---|---:|
+| `WINDOWS_VERSION` | `10` |
+| `WINDOWS_RAM` | `6G` |
+| `WINDOWS_CPUS` | `4` |
+| `WINDOWS_DISK` | `40G` |
+
+Windows 10 and 11 are supported by the project configuration; Windows 10 is the current default.
+
+Credentials are stored separately under:
+
+```text
+~/.config/winapps/credentials
+```
+
+The credentials file should remain mode `600`.
+
+### 2. Install/start Windows
+
+```bash
+./setup.sh install-windows
+```
+
+For a non-destructive validation first:
+
+```bash
+./setup.sh install-windows --dry-run
+```
+
+The Windows installer/web console is available locally at:
+
+```text
+http://127.0.0.1:8006
+```
+
+Complete Windows installation and install any desired Windows applications such as Microsoft Office before finalizing.
+
+### 3. Finalize Linux integration
+
+After Windows and the desired applications are installed:
+
+```bash
+./setup.sh finalize
+```
+
+`finalize`:
+
+1. starts Windows if necessary;
+2. verifies real FreeRDP authentication readiness;
+3. detects supported Windows applications;
+4. writes the application manifest;
+5. creates Linux desktop shortcuts.
+
+---
+
+## Authentication readiness
+
+TCP port `3389` becoming reachable does **not** mean Windows logon services are ready.
+
+The startup path therefore performs an authentication readiness check with FreeRDP. Windows is considered ready only after FreeRDP authentication succeeds.
+
+This avoids relying on a fixed cold-boot delay.
+
+---
+
+## Generated shortcuts
+
+Depending on the detected Windows applications, `finalize` can create:
+
+- Microsoft Word
+- Microsoft Excel
+- Microsoft PowerPoint
+- Windows PowerShell
+- Start Windows
+- Windows Desktop
+
+Desktop entries are created under:
+
+```text
+~/.local/share/applications/
+```
+
+Generated RemoteApp wrappers are stored under:
+
+```text
+~/.local/share/winapps/launchers/
 ```
 
 ---
 
-## Security
+## RemoteApp lifecycle
 
-- RDP is bound to `127.0.0.1` by default. Never expose port 3389 to the internet.
-- Never commit `.env` or `credentials` files. Both are excluded by `.gitignore`.
-- Store credentials with mode `600`.
-- The `/p:` argument exposes the password in the Linux process list. See `docs/13-security.md` for mitigation options.
-- Limit sudoers permissions to exactly the two Docker commands required.
+When the first application is opened:
+
+1. `broker-launcher.sh` starts or reuses the `WinApps` container.
+2. The launcher waits for successful Windows authentication.
+3. One FreeRDP RemoteApp connection starts the Windows broker.
+4. The requested application is queued through the redirected `winappsbroker` drive.
+
+When another application is opened while the broker is active:
+
+1. no second RDP session is created;
+2. a new request file is queued;
+3. the existing Windows broker launches the application.
+
+When applications close:
+
+- closing one application does not affect the others;
+- after the final managed application closes, the broker exits;
+- the Linux supervisor then stops the `WinApps` container.
+
+An exited container status such as `Exited (143)` after normal automatic shutdown is expected because Docker stops the container using SIGTERM.
 
 ---
 
-## Troubleshooting
+## Launch an application manually
 
-See [docs/12-troubleshooting.md](docs/12-troubleshooting.md) for full details.
+For a production-path manual launch, call the broker launcher directly.
 
-Run the diagnostic helper:
+Notepad:
+
+```bash
+./scripts/broker-launcher.sh 'C:\Windows\System32\notepad.exe'
+```
+
+Word:
+
+```bash
+./scripts/broker-launcher.sh 'C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE'
+```
+
+Excel:
+
+```bash
+./scripts/broker-launcher.sh 'C:\Program Files\Microsoft Office\Root\Office16\EXCEL.EXE'
+```
+
+PowerPoint:
+
+```bash
+./scripts/broker-launcher.sh 'C:\Program Files\Microsoft Office\Root\Office16\POWERPNT.EXE'
+```
+
+For a normal full Windows desktop:
+
+```bash
+./scripts/windows-desktop.sh
+```
+
+---
+
+## Test the installation
+
+Run the Notepad RemoteApp test:
+
+```bash
+./scripts/test-notepad.sh
+```
+
+Then test two applications together, for example Word and Excel.
+
+Expected behavior:
+
+1. both applications remain open simultaneously;
+2. only one broker FreeRDP connection is used;
+3. closing Word leaves Excel running;
+4. closing the final application shuts down the broker;
+5. the `WinApps` container then stops automatically.
+
+Check container state with:
+
+```bash
+docker ps -a --filter name=WinApps --format 'table {{.Names}}\t{{.Status}}'
+```
+
+---
+
+## Diagnostics
+
+Run:
 
 ```bash
 ./scripts/diagnose-winapps.sh
 ```
 
+The helper reports session type, FreeRDP version, Docker/container state, broker processes, broker PID files, configuration presence, and installed WinApps shortcuts.
+
+It does not modify the installation.
+
+---
+
+## Security
+
+- RDP is bound to `127.0.0.1` by default.
+- The web console is bound to `127.0.0.1` by default.
+- Do not expose RDP port `3389` directly to the internet.
+- Do not commit `.env` or credential files.
+- Keep `~/.config/winapps/credentials` at mode `600`.
+- FreeRDP arguments are supplied through `/args-from:stdin`.
+- The password therefore does not appear in the FreeRDP process argument list.
+- Docker runtime access is performed as the current user.
+- The persistent Windows volume is never automatically pruned.
+
+See [SECURITY.md](SECURITY.md) and [docs/13-security.md](docs/13-security.md).
+
+---
+
+## Persistent Windows data
+
+The Windows installation is stored in the Docker volume:
+
+```text
+winapps_data
+```
+
+The container itself is disposable.
+
+If the container is missing while `winapps_data` still exists, `scripts/start-windows.sh` can reconstruct the container around the existing persistent Windows disk.
+
+Do not manually delete `winapps_data` unless permanent Windows-data destruction is intended.
+
+---
+
+## Uninstall
+
+Safe default uninstall:
+
+```bash
+./uninstall.sh
+```
+
+This removes the disposable container and generated Linux integration, but preserves:
+
+- `winapps_data`;
+- the host WinApps working/shared directory.
+
+To permanently delete the Windows installation as well:
+
+```bash
+./uninstall.sh --purge-data
+```
+
+For explicitly confirmed non-interactive use:
+
+```bash
+./uninstall.sh --purge-data --yes
+```
+
+See [docs/14-uninstall.md](docs/14-uninstall.md).
+
+---
+
+## Troubleshooting
+
+See [docs/12-troubleshooting.md](docs/12-troubleshooting.md).
+
+Useful commands:
+
+```bash
+./scripts/diagnose-winapps.sh
+./scripts/preflight.sh
+docker ps -a --filter name=WinApps
+```
+
 Common issues:
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Window appears but no keyboard/mouse input | Wayland session | Log into X11/Xorg session |
-| `BadMatch` / `X_CopyArea` errors | Old FreeRDP version | Upgrade to FreeRDP 3.26+ |
-| `LOGON_MSG_BUMP_OPTIONS` | Competing RDP session | Run `query session` and `logoff` in Windows |
-| Connection reset on first launch | Port opens before login services ready | Increase `WINAPPS_COLD_BOOT_DELAY` |
-| Container does not stop after last app | `exec` prefix on `xfreerdp3` | Remove `exec` from launcher |
+| Symptom | Check |
+|---|---|
+| RemoteApp cannot receive input | Confirm `XDG_SESSION_TYPE=x11` |
+| Windows starts but app does not appear | Run diagnostics and verify authentication readiness |
+| A second application disrupts the first | Verify shortcuts target `broker-launcher.sh` |
+| Container remains running after final app closes | Inspect broker PID state and FreeRDP process |
+| Windows data appears missing | Verify the `winapps_data` volume still exists |
 
 ---
 
-## Tested with
+## Tested architecture
 
-- FreeRDP 3.26.0
-- Windows 11
-- Microsoft Office (Word, Excel, PowerPoint)
+The rebuilt v2 workflow has been exercised with:
+
+- Debian-family Linux / Parrot OS
+- X11/Xorg
+- Docker Engine
+- Docker Compose v2
+- FreeRDP 3
+- Windows 10
+- Microsoft Word
+- Microsoft Excel
+- Microsoft PowerPoint
+- Windows PowerShell
 - Notepad
-- Parrot OS (Debian-based)
-- X11/Xorg desktop session
+
+The configuration also supports selecting Windows 11 through setup configuration.
 
 ---
 
-## Docs
+## Documentation
 
 1. [Architecture overview](docs/01-overview.md)
 2. [Requirements](docs/02-requirements.md)
 3. [Install Docker](docs/03-install-docker.md)
-4. [Create Windows container](docs/04-create-windows-container.md)
+4. [Create/start Windows](docs/04-create-windows-container.md)
 5. [Configure Windows RemoteApp](docs/05-configure-windows.md)
 6. [Install FreeRDP](docs/06-install-freerdp.md)
 7. [Use an X11 session](docs/07-x11-session.md)
-8. [Install launcher](docs/08-install-launcher.md)
-9. [Configure sudoers](docs/09-sudoers.md)
-10. [Create desktop shortcuts](docs/10-create-shortcuts.md)
+8. [Finalize the installation](docs/08-install-launcher.md)
+9. [Docker user access](docs/09-sudoers.md)
+10. [Desktop shortcuts](docs/10-create-shortcuts.md)
 11. [Test the setup](docs/11-test.md)
 12. [Troubleshooting](docs/12-troubleshooting.md)
 13. [Security notes](docs/13-security.md)
@@ -313,4 +435,4 @@ Common issues:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+See [LICENSE](LICENSE).

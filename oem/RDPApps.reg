@@ -1,7 +1,36 @@
 Windows Registry Editor Version 5.00
 
+; ============================================================
+; Windows RemoteApp Linux v2
+; Remote Desktop / RemoteApp configuration
+; ============================================================
+
+; Enable Remote Desktop connections.
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server]
+"fDenyTSConnections"=dword:00000000
+
+; Require Network Level Authentication.
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp]
+"UserAuthentication"=dword:00000001
+
+; Disable the RemoteApp allow-list.
+; This allows us to launch arbitrary installed applications by path.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\TSAppAllowList]
+"fDisabledAllowList"=dword:00000001
+
+; Allow unlisted RemoteApp programs.
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services]
 "fAllowUnlistedRemotePrograms"=dword:00000001
 
-[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\TSAppAllowList]
-"fDisabledAllowList"=dword:00000001
+; Critical for our RemoteApp workflow:
+; Windows must boot to the sign-in screen rather than automatically
+; creating a competing console session.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon]
+"AutoAdminLogon"="0"
+
+; Keep Windows keyboard layout authoritative for RDP sessions.
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Keyboard Layout]
+"IgnoreRemoteKeyboardLayout"=dword:00000001
+
+; Prevent the network-discovery prompt from appearing after network changes.
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff]

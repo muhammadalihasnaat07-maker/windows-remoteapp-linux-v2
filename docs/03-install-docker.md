@@ -1,13 +1,29 @@
 # 3. Install Docker
 
-Use your distribution's current official Docker installation method.
+Install Docker Engine and Docker Compose v2 using either:
 
-After installation:
+```bash
+./scripts/install-dependencies.sh
+```
+
+or your distribution-specific instructions in `distro/`.
+
+If your distribution requires it, enable Docker:
 
 ```bash
 sudo systemctl enable --now docker
-sudo docker run --rm hello-world
-sudo docker compose version
 ```
 
-This guide uses `sudo docker` intentionally. Rootless Docker and Podman require different permissions and are not covered by the default launcher.
+The WinApps runtime requires Docker to work as the current Linux user.
+
+Verify:
+
+```bash
+docker --version
+docker compose version
+docker ps
+```
+
+If `docker ps` reports a permission error, fix Docker user access for your distribution and log out/in before continuing.
+
+The production WinApps launchers do not use privilege escalation for routine container startup or shutdown.

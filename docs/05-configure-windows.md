@@ -1,20 +1,49 @@
 # 5. Configure Windows RemoteApp
 
-The OEM registry file enables unlisted RemoteApps:
+Windows-side provisioning is performed automatically from the `oem/` directory.
+
+The OEM entry point is:
 
 ```text
-HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\fAllowUnlistedRemotePrograms = 1
-HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\TSAppAllowList\fDisabledAllowList = 1
+oem/install.bat
 ```
 
-If OEM provisioning did not apply the settings, import `oem/RDPApps.reg` manually as Administrator.
+It runs:
+
+```text
+oem/configure-winapps.ps1
+```
+
+The provisioning script applies the Remote Desktop and RemoteApp registry configuration from `oem/RDPApps.reg`.
+
+Important settings include:
+
+- enabling Remote Desktop;
+- requiring Network Level Authentication;
+- allowing unlisted RemoteApp programs;
+- disabling Windows automatic console logon to avoid a competing session;
+- starting Remote Desktop Services;
+- preparing Windows for the persistent RemoteApp broker.
+
+The broker implementation is:
+
+```text
+oem/winapps-broker.ps1
+```
+
+The RemoteApp broker receives application requests from the redirected FreeRDP drive and launches the requested Windows processes.
+
+If OEM provisioning must be inspected manually, use the local Windows console:
+
+```text
+http://127.0.0.1:8006
+```
 
 Avoid session conflicts:
 
-- Do not leave a full desktop RDP session active.
-- Log off old RDP sessions before testing RemoteApps.
-- Do not choose session takeover prompts.
-- Disable Windows automatic console logon if it creates a competing session.
+- do not leave an unnecessary full desktop RDP session active while testing RemoteApps;
+- log off stale competing RDP sessions;
+- keep automatic console logon disabled.
 
 Useful Windows commands:
 

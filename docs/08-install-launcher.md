@@ -1,16 +1,21 @@
-# 8. Install the launcher
+# 8. Finalize the installation
+
+The production launcher does not need to be copied into `~/.local/bin`.
+
+After Windows installation is complete and the desired Windows applications are installed, run:
 
 ```bash
-cd /path/to/repository
-./scripts/install-launcher.sh
-nano "$HOME/.config/winapps/credentials"
-chmod 600 "$HOME/.config/winapps/credentials"
+./setup.sh finalize
 ```
 
-If your Compose directory is not `$HOME/WinApps`, export:
+Finalization:
 
-```bash
-export WINAPPS_COMPOSE_DIR="$HOME/path/to/compose-directory"
-```
+1. starts or reuses Windows;
+2. waits for successful FreeRDP authentication;
+3. detects supported installed applications;
+4. writes `~/.config/winapps/apps.tsv`;
+5. creates Linux desktop shortcuts and generated broker wrappers.
 
-For permanent configuration, add variables to your shell profile or create a small wrapper script.
+Production RemoteApp shortcuts use the persistent broker architecture.
+
+If Windows applications are added later, run `./setup.sh finalize` again to refresh detection and shortcuts.

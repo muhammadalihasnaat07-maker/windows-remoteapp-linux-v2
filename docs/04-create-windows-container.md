@@ -1,25 +1,39 @@
-# 4. Create the Windows container
+# 4. Create or start Windows
+
+The v2 Windows installation is managed through `setup.sh`.
+
+Configure first:
 
 ```bash
-mkdir -p "$HOME/WinApps/oem"
-cd "$HOME/WinApps"
-cp /path/to/repository/examples/compose.yml .
-cp /path/to/repository/examples/.env.example .env
-cp /path/to/repository/oem/* ./oem/
-chmod 600 .env
-nano .env
+./setup.sh configure
 ```
 
-Start Windows:
+Optionally validate the install action:
 
 ```bash
-sudo docker compose up -d
+./setup.sh install-windows --dry-run
 ```
 
-Open the web console:
+Then start Windows installation:
+
+```bash
+./setup.sh install-windows
+```
+
+The default container is named `WinApps`.
+
+The persistent Windows disk is stored in the Docker volume:
+
+```text
+winapps_data
+```
+
+The Windows installer/web console is available at:
 
 ```text
 http://127.0.0.1:8006
 ```
 
-Complete Windows setup and install the required applications.
+Complete Windows installation there and install any desired Windows applications before finalizing.
+
+The container is disposable. The `winapps_data` volume is the persistent Windows asset and should not be deleted during routine troubleshooting.

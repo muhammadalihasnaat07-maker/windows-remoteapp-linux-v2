@@ -1,0 +1,51 @@
+name: winapps
+
+services:
+  windows:
+    image: "${WINAPPS_IMAGE:-ghcr.io/dockur/windows:latest}"
+    container_name: WinApps
+
+    environment:
+      VERSION: "${WINDOWS_VERSION}"
+      RAM_SIZE: "${WINDOWS_RAM}"
+      CPU_CORES: "${WINDOWS_CPUS}"
+      DISK_SIZE: "${WINDOWS_DISK}"
+
+      USERNAME: "${WINDOWS_USERNAME}"
+      PASSWORD: "${WINDOWS_PASSWORD}"
+
+      # Critical for RemoteApp.
+      #
+      # Dockur normally auto-logs into the Windows console.
+      # That creates a competing interactive session and can
+      # cause FreeRDP RemoteApp to get stuck at "Welcome".
+      AUTOLOGIN: "N"
+
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+
+    cap_add:
+      - NET_ADMIN
+
+    ports:
+      # Keep management/RDP accessible only from this Linux host.
+      - "127.0.0.1:8006:8006"
+      - "127.0.0.1:3389:3389/tcp"
+      - "127.0.0.1:3389:3389/udp"
+
+    volumes:
+      # Persistent Windows system disk.
+      - winapps_data:/storage
+
+      # Dedicated Linux ↔ Windows shared directory.
+      - "${WINAPPS_SHARED_DIR}:/shared"
+
+      # Automatic Windows-side provisioning files.
+      - "./oem:/oem:ro"
+
+    stop_grace_period: 2m
+
+volumes:
+  winapps_data:
+    name: winapps_data
