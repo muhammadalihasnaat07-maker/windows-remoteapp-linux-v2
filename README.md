@@ -41,7 +41,7 @@ The first RemoteApp starts Windows and establishes the broker session. Additiona
 
 ---
 
-## Requirements
+## PRE-Requirments
 
 - 64-bit Linux.
 - Hardware virtualization enabled.
@@ -61,7 +61,7 @@ The current tested configuration uses FreeRDP 3 and X11. Wayland/XWayland is not
 
 ## Install dependencies
 
-The repository includes a dependency installer for supported Debian-family systems:
+The repository includes a dependency/PRE-Requirments installer for supported Debian-family systems:
 
 ```bash
 ./scripts/install-dependencies.sh
