@@ -135,12 +135,49 @@ Credentials are stored separately under:
 
 The credentials file should remain mode `600`.
 
-### 2. Install/start Windows
+### 2. Install Windows
+
+Run the Windows installation step:
 
 ```bash
 ./setup.sh install-windows
 ```
 
+<!-- 👇 PASTE START: Right after the install-windows command in Step 2 👇 -->
+
+#### Step 2 (Part 1): Fix Podman Socket Error (If Step 2 Fails)
+
+> [!WARNING]
+> **Only follow this step if `./setup.sh install-windows` fails because the Podman socket service isn't running.**
+
+Since you are using rootless Podman (`uid 1000`), start and enable the socket service as your user:
+
+```bash
+systemctl --user enable --now podman.socket
+```
+
+Then verify that the service is running and the socket exists:
+
+```bash
+systemctl --user status podman.socket
+ls -la /run/user/1000/podman/podman.sock
+```
+
+If the socket dies after logout or reboot, also enable linger:
+
+```bash
+sudo loginctl enable-linger $(whoami)
+```
+
+After that, re-run `./setup.sh install-windows` — the `docker-compose` (`podman-compose`) provider will now be able to connect to the socket.
+
+<!-- 👆 PASTE END: Keep your existing completion note and Step 3 below 👆 -->
+
+Complete Windows installation and install any desired Windows applications such as Microsoft Office before finalizing.
+
+Finalize Linux integration
+
+After Windows and the desired applications are installed:
 For a non-destructive validation first:
 
 ```bash
