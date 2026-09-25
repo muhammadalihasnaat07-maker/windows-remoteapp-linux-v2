@@ -169,9 +169,12 @@ If the socket dies after logout or reboot, also enable linger:
 sudo loginctl enable-linger $(whoami)
 ```
 
-After that, re-run `./setup.sh install-windows` — the `docker-compose` (`podman-compose`) provider will now be able to connect to the socket.
+After that, re-run `
+'''bash
+./setup.sh install-windows 
+'''
+ `The docker-compose` (`podman-compose`) provider will now be able to connect to the socket.
 
-<!-- 👆 PASTE END: Keep your existing completion note and Step 3 below 👆 -->
 
 Complete Windows installation and install any desired Windows applications such as Microsoft Office before finalizing.
 
