@@ -59,7 +59,7 @@ The current tested configuration uses FreeRDP 3 and X11. Wayland/XWayland is not
 
 ---
 
-## Install dependencies
+## Install dependencies/PRE-Requirments
 
 The repository includes a dependency/PRE-Requirments installer for supported Debian-family systems:
 
