@@ -87,7 +87,7 @@ For distribution-specific notes, see `distro/`.
 
 ---
 
-## Preflight (Dependencies/PRE-Requirments)
+## Preflight (Dependencies/PRE-Requirments) Failure
 
 Run:
 
