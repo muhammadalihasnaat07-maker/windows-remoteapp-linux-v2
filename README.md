@@ -152,6 +152,28 @@ The Windows installer/web console is available locally at:
 ```text
 http://127.0.0.1:8006
 ```
+**###3. Podman Error **
+if The podman socket service isn't running.
+
+The podman socket service isn't running. Since you're using rootless podman (uid 1000), start it as your user:
+
+```bash
+systemctl --user enable --now podman.socket
+'''
+
+Then verify:
+
+```bash
+systemctl --user status podman.socket
+ls -la /run/user/1000/podman/podman.sock
+'''
+
+If the socket dies after logout/reboot, also enable linger:
+```bash
+sudo loginctl enable-linger $(whoami)
+'''
+
+After that, re-run ./setup.sh install-windows — the docker-compose (podman-compose) provider will now be able to connect to the socket. 
 
 Complete Windows installation and install any desired Windows applications such as Microsoft Office before finalizing.
 
