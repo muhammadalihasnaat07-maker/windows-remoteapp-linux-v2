@@ -143,7 +143,7 @@ Run the Windows installation step:
 ./setup.sh install-windows
 ```
 
-<!-- 👇 PASTE START: Right after the install-windows command in Step 2 👇 -->
+
 
 #### Step 2 (Part 1): Fix Podman Socket Error (If Step 2 Fails)
 
@@ -165,15 +165,17 @@ ls -la /run/user/1000/podman/podman.sock
 
 If the socket dies after logout or reboot, also enable linger:
 
-```bash
+``` bash
 sudo loginctl enable-linger $(whoami)
 ```
 
-After that, re-run `
-'''bash
-./setup.sh install-windows 
-'''
- `The docker-compose` (`podman-compose`) provider will now be able to connect to the socket.
+After that, re-run the installation command:
+
+```bash
+./setup.sh install-windows
+```
+
+The `docker-compose` (`podman-compose`) provider will now be able to connect to the socket.
 
 
 Complete Windows installation and install any desired Windows applications such as Microsoft Office before finalizing.
